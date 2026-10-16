@@ -1,6 +1,7 @@
 ﻿using AITranslator.Exceptions;
 using AITranslator.Translator.TranslateData;
 using AITranslator.View.Models;
+using System.IO;
 
 namespace AITranslator.Translator.Models
 {
@@ -91,14 +92,19 @@ namespace AITranslator.Translator.Models
 
         public static string GetFileName(string dicName, string fileName, TranslateDataType dataType, GenerateFileType FileType)
         {
+            ValidateLeafName(dicName, nameof(dicName));
             if (FileType == GenerateFileType.Merged)
-                return $"{TranslatedDataDic}/{dicName}/{fileName}";
+            {
+                ValidateLeafName(fileName, nameof(fileName));
+                return $"{TranslatedDataDic}/{dicName}/output/{fileName}";
+            }
 
             return GetFileName(dicName, dataType, FileType);
         }
 
         public static string GetFileName(string dicName, TranslateDataType dataType, GenerateFileType FileType)
         {
+            ValidateLeafName(dicName, nameof(dicName));
             if (FileType == GenerateFileType.Config)
                 return $"{TranslatedDataDic}/{dicName}/配置文件.json";
 
@@ -172,7 +178,16 @@ namespace AITranslator.Translator.Models
 
         public static string GetDicName(string dicName)
         {
+            ValidateLeafName(dicName, nameof(dicName));
             return $"{TranslatedDataDic}/{dicName}";
+        }
+
+        static void ValidateLeafName(string value, string parameter)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value is "." or ".." ||
+                value.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                value.EndsWith('.') || value.EndsWith(' '))
+                throw new ArgumentException("名称必须是单个有效文件或文件夹名，不能包含路径。", parameter);
         }
     }
 }

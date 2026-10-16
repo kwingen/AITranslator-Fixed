@@ -258,11 +258,8 @@ namespace AITranslator.View.Models
             },
             (err) =>
             {
-                if (err is DicNotFoundException)
-                {
-                    ViewModelManager.ViewModel.RemoveTask(this);
-                    return;
-                }
+                // Startup/configuration errors must never delete a translation task.
+                // Removal is a separate, explicitly confirmed user operation.
                 if (ViewModelManager.ViewModel.ActiveTask == this)
                     ViewModelManager.ViewModel.ActiveTask = null;
                 if (_translator is not null)
@@ -306,24 +303,36 @@ namespace AITranslator.View.Models
         }
         public void merge()
         {
-            if (_translator is null)
-                CreateTranslator();
-            _translator!.MergeData();
-            _translator = null;
-            ToCompletedTasks();
+            TaskState beforeState = State;
+            try
+            {
+                if (_translator is null)
+                    CreateTranslator();
+                _translator!.MergeData();
+                ToCompletedTasks();
+            }
+            catch
+            {
+                State = beforeState;
+                throw;
+            }
+            finally
+            {
+                _translator = null;
+            }
         }
         public void openDic()
         {
             string diaName = PublicParams.GetDicName(DicName);
             if (!Directory.Exists(diaName))
-                throw new DicNotFoundException($"任务[{fileName}]文件夹已被删除，无法打开文件夹，此任务将被删除");
+                throw new DicNotFoundException($"任务[{FileName}]文件夹不存在，请恢复文件夹；任务已保留。");
             Process.Start("explorer.exe", diaName.ReplaceSlash());
         }
         void CreateTranslator()
         {
             string diaName = PublicParams.GetDicName(DicName);
             if (!Directory.Exists(diaName))
-                throw new DicNotFoundException($"任务[{FileName}]文件夹已被删除，无法打开文件夹，此任务将被删除");
+                throw new DicNotFoundException($"任务[{FileName}]文件夹不存在，请恢复文件夹；任务已保留。");
 
             //检测配置模板是否配置
             if (TemplateConfig is null)
@@ -345,7 +354,7 @@ namespace AITranslator.View.Models
             //检测配置模板里的规则模板文件夹是否存在
             string templateDicPath = $"{PublicParams.TemplatesDic}\\{TemplateConfigParams.TemplateDic}";
             if (!Directory.Exists(templateDicPath))
-                throw new DicNotFoundException($"模板文件夹{TemplateConfigParams.TemplateDic}不存在，请确认模板文件夹是否已被删除");
+                throw new KnownException($"模板文件夹{TemplateConfigParams.TemplateDic}不存在，请恢复模板或重新配置；任务与翻译成果已保留。");
 
             _translator = TranslateType switch
             {
@@ -406,7 +415,7 @@ namespace AITranslator.View.Models
         public void ReadConfig()
         {
             //读取配置文件
-            ConfigSave_Translate config = JsonPersister.Load<ConfigSave_Translate>(PublicParams.GetFileName(DicName, TranslateType, GenerateFileType.Config));
+            ConfigSave_Translate config = JsonPersister.LoadInternal<ConfigSave_Translate>(PublicParams.GetFileName(DicName, TranslateType, GenerateFileType.Config));
             FileName = config.FileName;
             TemplateConfig = ViewModelManager.ViewModel.TemplateConfigs.FirstOrDefault(s => s.Name == config.TemplateConfig);
             TranslateType = config.TranslateType;
@@ -424,12 +433,18 @@ namespace AITranslator.View.Models
                 Window_Message.ShowDialog("提示", "请先加载模型！");
                 return;
             }
-            ExpandedFuncs.TryExceptions(() =>
+            if (!ExpandedFuncs.TryExceptions(() =>
             {
-                File.Delete(PublicParams.GetFileName(DicName, TranslateType, GenerateFileType.Failed));
+                string failedPath = PublicParams.GetFileName(DicName, TranslateType, GenerateFileType.Failed);
+                // Commit an empty checkpoint instead of deleting its primary: otherwise
+                // backup recovery resurrects the very failures the user asked to retry.
+                if (TranslateType == TranslateDataType.Srt)
+                    SrtPersister.Save(new Dictionary<int, SrtData>(), failedPath);
+                else
+                    JsonPersister.Save(new Dictionary<string, string>(), failedPath);
                 State = TaskState.Pause;
-            });
-
+            }))
+                return;
 
             Start();
         }
@@ -449,17 +464,13 @@ namespace AITranslator.View.Models
         [RelayCommand]
         private void OpenDic()
         {
-            ExpandedFuncs.TryExceptions(() => openDic(),
-            (err) =>
-            {
-                if (err is DicNotFoundException)
-                    ViewModelManager.ViewModel.RemoveTask(this);
-            });
+            ExpandedFuncs.TryExceptions(() => openDic());
         }
 
         [RelayCommand]
         private void Merge()
         {
+            TaskState beforeState = State;
             ExpandedFuncs.TryExceptions(() =>
             {
 
@@ -481,12 +492,11 @@ namespace AITranslator.View.Models
                 else
                     merge();
 
-            },
-                (err) =>
-                {
-                    if (err is DicNotFoundException)
-                        ViewModelManager.ViewModel.RemoveTask(this);
-                });
+            }, _ =>
+            {
+                State = beforeState;
+                _translator = null;
+            });
         }
 
 

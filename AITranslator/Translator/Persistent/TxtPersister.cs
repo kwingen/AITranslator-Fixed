@@ -14,6 +14,8 @@ namespace AITranslator.Translator.Persistent
 {
     public static class TxtPersister
     {
+        public static List<string> LoadInternal(string filePath) => CheckpointFile.Load(filePath, Load);
+
         public static List<string> Load(string filePath)
         {
             FileInfo fileInfo = new FileInfo(filePath);
@@ -23,22 +25,7 @@ namespace AITranslator.Translator.Persistent
             string fileBakName = fileNameNoExtension + "_bak" + fileExtension;
             try
             {
-                string strSource;
-                if (File.Exists(fileBakName))
-                {
-                    try
-                    {
-                        strSource = ReadNovel(fileBakName);
-                        File.Move(fileBakName, fileName, true);
-                    }
-                    catch (Exception)
-                    {
-                        File.Delete(fileBakName);
-                        strSource = ReadNovel(fileName);
-                    }
-                }
-                else
-                    strSource = ReadNovel(fileName);
+                string strSource = ReadNovel(fileName);
 
                 return strSource.Split("\n").Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
             }
@@ -62,16 +49,7 @@ namespace AITranslator.Translator.Persistent
             try
             {
                 string strString = string.Join('\n', datas);
-                File.WriteAllText(fileBakName, strString);
-                File.Delete(fileName);
-                File.Copy(fileBakName, fileName, true);
-                File.Delete(fileBakName);
-                if (hide)
-                {
-                    FileAttributes attributes = File.GetAttributes(filePath);
-                    attributes |= FileAttributes.Hidden;
-                    File.SetAttributes(filePath, attributes);
-                }
+                CheckpointFile.WriteAllText(fileName, strString, hide, path => Load(path) is not null);
             }
             catch (IOException)
             {

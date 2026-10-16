@@ -147,8 +147,9 @@ namespace AITranslator.Translator.Translation
             foreach (var replace in task.Replaces)
                 _replaces[replace.Key] = replace.Value ?? string.Empty;
 
-            //计算当前进度
-            CalculateProgress();
+            // Construction is read-only: manual merge may still fail, so do not
+            // rewrite a persisted WaitMerge checkpoint to Pause before doing work.
+            _translationTask.Progress = TranslateData.GetProgress();
 
         }
 
@@ -227,14 +228,15 @@ namespace AITranslator.Translator.Translation
                     _translationTask.State = TaskState.Translating;
                     ViewModelManager.WriteLine($"[{DateTime.Now:G}]开始翻译");
                     //创建连接客户端，设置超时时间10分钟
-                    _communicator = ViewModelManager.ViewModel.Communicator.CommunicatorType switch
+                    var credential = ViewModelManager.ViewModel.Communicator.CaptureCredentialSnapshot();
+                    _communicator = credential.CommunicatorType switch
                     {
                         CommunicatorType.LLama => new LLamaCommunicator(),
                         CommunicatorType.OpenAI => new OpenAICommunicator(
-                            new Uri(ViewModelManager.ViewModel.Communicator.ServerURL + "/chat/completions"),
-                            ViewModelManager.ViewModel.Communicator.ApiKey,
-                            ViewModelManager.ViewModel.Communicator.Model,
-                            ViewModelManager.ViewModel.Communicator.ExpendedParams),
+                            new Uri(credential.ServerURL + "/chat/completions"),
+                            credential.ApiKey,
+                            credential.Model,
+                            credential.ExpendedParams),
                         _ => throw ExceptionThrower.InvalidCommunicator,
                     };
                     TranslateData.GetUntranslatedData();
@@ -447,7 +449,18 @@ namespace AITranslator.Translator.Translation
             }
 
             string str_join = string.Join('\n', processed_texts);
-            string str_result = TryTranslate(str_join, _example[^1].content! + "\n", useHistory, TryTranslateType.Mult);
+            string str_result;
+            try
+            {
+                str_result = TryTranslate(str_join, _example[^1].content! + "\n", useHistory, TryTranslateType.Mult);
+            }
+            catch (OpenAICommunicationException error) when (mergeValues.Count > 1 &&
+                error.FailureKind is OpenAIFailureKind.ContextLengthExceeded or OpenAIFailureKind.OutputTruncated)
+            {
+                // The caller verifies and checkpoints each fallback item before requesting the next.
+                // Never hold successful child requests here: a later failure would lose paid progress.
+                return null;
+            }
 
             //如果返回结果的换行符数量不一致，调用逐句翻译模式
             string[] strs_result = str_result.Split('\n');
@@ -480,8 +493,8 @@ namespace AITranslator.Translator.Translation
 
         internal string Translate_NoResetNewline(string value, bool useHistory, TryTranslateType type)
         {
-            string str_result = TryTranslate(value, _example[^1].content!, useHistory, type);
-            return str_result;
+            // Keep entry boundaries with the caller; it owns verification and durable checkpoints.
+            return TryTranslate(value, _example[^1].content!, useHistory, type);
         }
 
         /// <summary>
@@ -512,9 +525,21 @@ namespace AITranslator.Translator.Translation
             postData.presence_penalty = param.PresencePenalty;
             postData.stop = param.Stops.ToArray();
 
-            string str_result = _communicator!.Translate(postData, headers, histories, $"{prompt_with_text}{str}", out double speed);
-            _translationTask.Speed = speed;
-            return str_result;
+            while (true)
+            {
+                try
+                {
+                    string str_result = _communicator!.Translate(postData, headers, histories, $"{prompt_with_text}{str}", out double speed);
+                    _translationTask.Speed = speed;
+                    return str_result;
+                }
+                catch (OpenAICommunicationException error) when (
+                    error.FailureKind == OpenAIFailureKind.ContextLengthExceeded && histories.Length > 0)
+                {
+                    // Keep the prompt and source intact; only discard the oldest dialogue pair.
+                    histories = histories.Skip(Math.Min(2, histories.Length)).ToArray();
+                }
+            }
         }
 
         ConfigSave_TranslatePrams? GetTranslatePrams(TryTranslateType type)

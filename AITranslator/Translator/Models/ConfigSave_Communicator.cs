@@ -1,4 +1,7 @@
 ﻿using AITranslator.View.Models;
+using AITranslator.Security;
+using Newtonsoft.Json;
+using System.Runtime.Serialization;
 using AITranslator.View.UserControls;
 using System;
 using System.Collections.Generic;
@@ -9,6 +12,7 @@ using System.Threading.Tasks;
 
 namespace AITranslator.Translator.Models
 {
+    [JsonConverter(typeof(CredentialConfigReader))]
     internal class ConfigSave_Communicator
     {
         /// <summary>
@@ -52,7 +56,69 @@ namespace AITranslator.Translator.Models
         /// <summary>
         /// API密钥
         /// </summary>
-        public string ApiKey { get; set; }
+        private string apiKey = string.Empty;
+        private string? apiKeyEndpoint;
+
+        [JsonIgnore]
+        public string ApiKey
+        {
+            get
+            {
+                if (apiKeyEndpoint != null && apiKeyEndpoint != CredentialEndpoint)
+                    throw new CredentialProtectionException();
+                return apiKey;
+            }
+            set
+            {
+                apiKey = value ?? string.Empty;
+                apiKeyEndpoint = null;
+                CredentialId = null;
+            }
+        }
+
+        // Only this opaque identifier travels with a loader. DPAPI blobs stay in LocalAppData.
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public string? CredentialId { get; private set; }
+
+        [JsonProperty("ApiKey")]
+        private string? LegacyApiKey { set => apiKey = value ?? string.Empty; }
+
+        private string CredentialEndpoint
+        {
+            get
+            {
+                if (CommunicatorType != CommunicatorType.OpenAI ||
+                    !Uri.TryCreate(ServerURL, UriKind.Absolute, out var endpoint) ||
+                    (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp) ||
+                    !string.IsNullOrEmpty(endpoint.UserInfo) || !string.IsNullOrEmpty(endpoint.Fragment) ||
+                    ServerURL.Any(char.IsControl))
+                    throw new CredentialProtectionException();
+                // Preserve the exact endpoint, including path, query, scheme and port. Never rebind a key.
+                return ServerURL;
+            }
+        }
+
+        [OnSerializing]
+        private void PersistApiKey(StreamingContext context)
+        {
+            if (string.IsNullOrEmpty(ApiKey))
+                CredentialId = null;
+            else if (CredentialId == null)
+            {
+                CredentialId = LocalCredentialStore.Save(apiKey, CredentialEndpoint);
+                apiKeyEndpoint = CredentialEndpoint;
+            }
+        }
+
+        [OnDeserialized]
+        private void RestoreApiKey(StreamingContext context)
+        {
+            if (CredentialId != null)
+            {
+                apiKey = LocalCredentialStore.Load(CredentialId, CredentialEndpoint);
+                apiKeyEndpoint = CredentialEndpoint;
+            }
+        }
         /// <summary>
         /// 翻译服务的访问URL
         /// </summary>
@@ -67,8 +133,9 @@ namespace AITranslator.Translator.Models
 
         public void CopyFromViewModel(ViewModel_Communicator vm)
         {
-            CommunicatorType = vm.CommunicatorType;
-            switch (vm.CommunicatorType)
+            var snapshot = vm.CaptureCredentialSnapshot();
+            CommunicatorType = snapshot.CommunicatorType;
+            switch (snapshot.CommunicatorType)
             {
                 case CommunicatorType.LLama:
                     ModelPath = vm.ModelPath;
@@ -79,10 +146,10 @@ namespace AITranslator.Translator.Models
                     InstructTemplateName = vm.CurrentInstructTemplate?.Name;
                     break;
                 case CommunicatorType.OpenAI:
-                    Model = vm.Model;
-                    ApiKey = vm.ApiKey;
-                    ServerURL = vm.ServerURL;
-                    ExpendedParams = vm.ExpendedParams;
+                    Model = snapshot.Model;
+                    ServerURL = snapshot.ServerURL;
+                    ApiKey = snapshot.ApiKey;
+                    ExpendedParams = snapshot.ExpendedParams;
                     break;
                 default:
                     break;
@@ -105,9 +172,8 @@ namespace AITranslator.Translator.Models
                     break;
                 case CommunicatorType.OpenAI:
                     vm.Model = Model;
-                    vm.ApiKey = ApiKey;
-                    vm.ServerURL = ServerURL;
                     vm.ExpendedParams = ExpendedParams;
+                    vm.RestoreCredentialSnapshot(CommunicatorType, ServerURL, ApiKey);
                     break;
                 default:
                     break;

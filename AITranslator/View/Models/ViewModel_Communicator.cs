@@ -22,8 +22,12 @@ namespace AITranslator.View.Models
         /// <summary>
         /// 是否使用OpenAI接口的第三方加载库
         /// </summary>
-        [ObservableProperty]
-        private CommunicatorType communicatorType = CommunicatorType.LLama;
+        public CommunicatorType CommunicatorType
+        {
+            get => CaptureCredentialSnapshot().CommunicatorType;
+            set => SetCredentialProperty(value, nameof(CommunicatorType), current => current.CommunicatorType,
+                (current, next) => current with { CommunicatorType = next, ApiKey = string.Empty }, true);
+        }
 
         #region llama
         /// <summary>
@@ -84,21 +88,95 @@ namespace AITranslator.View.Models
         /// <summary>
         /// API密钥
         /// </summary>
-        [ObservableProperty]
-        private string apiKey;
+        public string ApiKey
+        {
+            get => CaptureCredentialSnapshot().ApiKey;
+            set => SetCredentialProperty(value ?? string.Empty, nameof(ApiKey), current => current.ApiKey,
+                (current, next) => current with { ApiKey = next });
+        }
         /// <summary>
         /// 翻译服务的URL
         /// </summary>
         [Required(ErrorMessage = "必须输入远程URL！")]
         [Url(ErrorMessage = "请输入有效的远程URL！")]
-        [ObservableProperty]
-        private string serverURL = "http://127.0.0.1:5000";
+        public string ServerURL
+        {
+            get => CaptureCredentialSnapshot().ServerURL;
+            set => SetCredentialProperty(value, nameof(ServerURL), current => current.ServerURL,
+                (current, next) => current with { ServerURL = next, ApiKey = string.Empty }, true);
+        }
         /// <summary>
         /// 额外的配置参数
         /// </summary>
         [ObservableProperty]
         private string expendedParams;
         #endregion
+
+        // Publish destination and explicitly entered credential together. Send/save must capture
+        // this immutable value once, never compose a destination from separate live getters.
+        private CommunicatorCredentialSnapshot credentialSnapshot = new(
+            CommunicatorType.LLama, "http://127.0.0.1:5000", string.Empty, string.Empty, string.Empty);
+        private readonly object credentialGate = new();
+        private long credentialDestinationVersion;
+
+        internal CommunicatorCredentialSnapshot CaptureCredentialSnapshot() => Volatile.Read(ref credentialSnapshot);
+
+        internal void RestoreCredentialSnapshot(CommunicatorType type, string endpoint, string key)
+        {
+            lock (credentialGate)
+            {
+                string[] properties = [nameof(CommunicatorType), nameof(ServerURL), nameof(ApiKey)];
+                foreach (string property in properties) OnPropertyChanging(property);
+                // Publish the saved destination and its key as one immutable value.
+                // Observers running afterwards may edit it, but those edits clear the key.
+                Volatile.Write(ref credentialSnapshot, credentialSnapshot with
+                {
+                    CommunicatorType = type, ServerURL = endpoint ?? string.Empty, ApiKey = key ?? string.Empty
+                });
+                long committedVersion = ++credentialDestinationVersion;
+                foreach (string property in properties[..^1]) OnPropertyChanged(property);
+                // Older UI listeners clear the key on destination notifications. Restore it
+                // only when no listener has changed the destination since this atomic commit.
+                if (credentialDestinationVersion == committedVersion)
+                    Volatile.Write(ref credentialSnapshot, credentialSnapshot with { ApiKey = key ?? string.Empty });
+                OnPropertyChanged(nameof(ApiKey));
+            }
+        }
+
+        private void UpdateCredentialSnapshot(Func<CommunicatorCredentialSnapshot, CommunicatorCredentialSnapshot> update)
+        {
+            lock (credentialGate)
+                Volatile.Write(ref credentialSnapshot, update(credentialSnapshot));
+        }
+
+        private void SetCredentialProperty<T>(T value, string propertyName,
+            Func<CommunicatorCredentialSnapshot, T> read,
+            Func<CommunicatorCredentialSnapshot, T, CommunicatorCredentialSnapshot> update,
+            bool clearsCredential = false)
+        {
+            lock (credentialGate)
+            {
+                if (EqualityComparer<T>.Default.Equals(read(credentialSnapshot), value)) return;
+                bool notifyKey = clearsCredential && credentialSnapshot.ApiKey.Length != 0;
+                long boundVersion = credentialDestinationVersion;
+                OnPropertyChanging(propertyName);
+                if (notifyKey) OnPropertyChanging(nameof(ApiKey));
+                // A credential entry is bound to the destination at setter entry, not one
+                // selected reentrantly by an observer while this entry is in progress.
+                if (!clearsCredential && boundVersion != credentialDestinationVersion) return;
+                // The snapshot is also the property's backing state: an observer exception cannot
+                // publish an endpoint that the UI getter never accepted. lock always unwinds.
+                Volatile.Write(ref credentialSnapshot, update(credentialSnapshot, value));
+                if (clearsCredential) credentialDestinationVersion++;
+                OnPropertyChanged(propertyName);
+                if (notifyKey) OnPropertyChanged(nameof(ApiKey));
+            }
+        }
+
+        partial void OnModelChanging(string value) =>
+            UpdateCredentialSnapshot(current => current with { Model = value });
+        partial void OnExpendedParamsChanging(string value) =>
+            UpdateCredentialSnapshot(current => current with { ExpendedParams = value });
 
         List<string> OpenAIParams = [nameof(Model), nameof(ApiKey), nameof(ServerURL), nameof(ExpendedParams)];
         public override bool ValidateError()
@@ -346,5 +424,11 @@ namespace AITranslator.View.Models
             ViewModelManager.SaveBaseConfig();
             Window_Message.ShowDialog("提示", $"设置[{fileName}]为默认加载器模板成功");
         }
+    }
+
+    internal sealed record CommunicatorCredentialSnapshot(CommunicatorType CommunicatorType,
+        string ServerURL, string ApiKey, string Model, string ExpendedParams)
+    {
+        public override string ToString() => $"{CommunicatorType}: {ServerURL} (credential redacted)";
     }
 }

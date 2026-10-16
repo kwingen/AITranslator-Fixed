@@ -6,6 +6,7 @@ using AITranslator.View.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -14,16 +15,19 @@ namespace AITranslator.Translator.Translation
     public class ManualTranslator : IDisposable
     {
         internal ICommunicator _communicator;
-        public ManualTranslator()
+        public ManualTranslator() : this(ViewModelManager.ViewModel.Communicator) { }
+
+        internal ManualTranslator(ViewModel_Communicator vm, HttpClient? client = null)
         {
-            _communicator = ViewModelManager.ViewModel.Communicator.CommunicatorType switch
+            var snapshot = vm.CaptureCredentialSnapshot();
+            _communicator = snapshot.CommunicatorType switch
             {
                 CommunicatorType.LLama => new LLamaCommunicator(),
-                CommunicatorType.OpenAI => new OpenAICommunicator(
-                    new Uri(ViewModelManager.ViewModel.Communicator.ServerURL + "/chat/completions"),
-                    ViewModelManager.ViewModel.Communicator.ApiKey,
-                    ViewModelManager.ViewModel.Communicator.Model,
-                    ViewModelManager.ViewModel.Communicator.ExpendedParams),
+                CommunicatorType.OpenAI => client == null
+                    ? new OpenAICommunicator(new Uri(snapshot.ServerURL + "/chat/completions"),
+                        snapshot.ApiKey, snapshot.Model, snapshot.ExpendedParams)
+                    : new OpenAICommunicator(new Uri(snapshot.ServerURL + "/chat/completions"),
+                        snapshot.ApiKey, snapshot.Model, snapshot.ExpendedParams, client),
                 _ => throw ExceptionThrower.InvalidCommunicator,
             };
         }

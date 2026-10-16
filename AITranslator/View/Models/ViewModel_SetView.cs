@@ -53,28 +53,89 @@ namespace AITranslator.View.Models
         /// <summary>
         /// 邮箱地址
         /// </summary>
-        [ObservableProperty]
-        private string emailAddress;
+        public string EmailAddress
+        {
+            get => CaptureCredentialSnapshot().EmailAddress;
+            set => SetCredentialProperty(value ?? string.Empty, nameof(EmailAddress), current => current.EmailAddress,
+                (current, next) => current with { EmailAddress = next, EmailPassword = string.Empty }, true);
+        }
         /// <summary>
         /// 邮箱密码
         /// </summary>
-        [ObservableProperty]
-        private string emailPassword;
+        public string EmailPassword
+        {
+            get => CaptureCredentialSnapshot().EmailPassword;
+            set => SetCredentialProperty(value ?? string.Empty, nameof(EmailPassword), current => current.EmailPassword,
+                (current, next) => current with { EmailPassword = next });
+        }
         /// <summary>
         /// SMTP服务器地址
         /// </summary>
-        [ObservableProperty]
-        private string smtpAddress = "smtp.qq.com";
+        public string SmtpAddress
+        {
+            get => CaptureCredentialSnapshot().SmtpAddress;
+            set => SetCredentialProperty(value ?? string.Empty, nameof(SmtpAddress), current => current.SmtpAddress,
+                (current, next) => current with { SmtpAddress = next, EmailPassword = string.Empty }, true);
+        }
         /// <summary>
         /// SMTP服务器端口
         /// </summary>
-        [ObservableProperty]
-        private ushort smtpPort = 587;
+        public ushort SmtpPort
+        {
+            get => CaptureCredentialSnapshot().SmtpPort;
+            set => SetCredentialProperty(value, nameof(SmtpPort), current => current.SmtpPort,
+                (current, next) => current with { SmtpPort = next, EmailPassword = string.Empty }, true);
+        }
         /// <summary>
         /// SMTP服务使用SSL
         /// </summary>
-        [ObservableProperty]
-        private bool smtpUseSSL = true;
+        public bool SmtpUseSSL
+        {
+            get => CaptureCredentialSnapshot().SmtpUseSSL;
+            set => SetCredentialProperty(value, nameof(SmtpUseSSL), current => current.SmtpUseSSL,
+                (current, next) => current with { SmtpUseSSL = next, EmailPassword = string.Empty }, true);
+        }
+
+        private SmtpCredentialSnapshot credentialSnapshot = new(string.Empty, string.Empty, "smtp.qq.com", 587, true);
+        private readonly object credentialGate = new();
+        private long credentialDestinationVersion;
+
+        internal SmtpCredentialSnapshot CaptureCredentialSnapshot() => Volatile.Read(ref credentialSnapshot);
+
+        internal void RestoreCredentialSnapshot(SmtpCredentialSnapshot snapshot)
+        {
+            lock (credentialGate)
+            {
+                string[] properties = [nameof(EmailAddress), nameof(SmtpAddress), nameof(SmtpPort), nameof(SmtpUseSSL), nameof(EmailPassword)];
+                foreach (string property in properties) OnPropertyChanging(property);
+                Volatile.Write(ref credentialSnapshot, snapshot);
+                long committedVersion = ++credentialDestinationVersion;
+                foreach (string property in properties[..^1]) OnPropertyChanged(property);
+                if (credentialDestinationVersion == committedVersion)
+                    Volatile.Write(ref credentialSnapshot, credentialSnapshot with { EmailPassword = snapshot.EmailPassword });
+                OnPropertyChanged(nameof(EmailPassword));
+            }
+        }
+
+        private void SetCredentialProperty<T>(T value, string propertyName,
+            Func<SmtpCredentialSnapshot, T> read,
+            Func<SmtpCredentialSnapshot, T, SmtpCredentialSnapshot> update,
+            bool clearsCredential = false)
+        {
+            lock (credentialGate)
+            {
+                if (EqualityComparer<T>.Default.Equals(read(credentialSnapshot), value)) return;
+                bool notifyPassword = clearsCredential && credentialSnapshot.EmailPassword.Length != 0;
+                long boundVersion = credentialDestinationVersion;
+                OnPropertyChanging(propertyName);
+                if (notifyPassword) OnPropertyChanging(nameof(EmailPassword));
+                if (!clearsCredential && boundVersion != credentialDestinationVersion) return;
+                Volatile.Write(ref credentialSnapshot, update(credentialSnapshot, value));
+                if (clearsCredential) credentialDestinationVersion++;
+                OnPropertyChanged(propertyName);
+                if (notifyPassword) OnPropertyChanged(nameof(EmailPassword));
+            }
+        }
         /// <summary>
         /// 重翻失败部分
         /// </summary>
@@ -93,18 +154,15 @@ namespace AITranslator.View.Models
 
         public void Enable()
         {
+            var snapshot = CaptureCredentialSnapshot();
             ViewModel_SetView vm = ViewModelManager.ViewModel.SetView_ViewModel;
             vm.DefaultTemplate_MTool = DefaultTemplate_MTool;
             vm.DefaultTemplate_Tpp = DefaultTemplate_Tpp;
             vm.DefaultTemplate_Srt = DefaultTemplate_Srt;
             vm.DefaultTemplate_Txt = DefaultTemplate_Txt;
             vm.EnableEmail = EnableEmail;
-            vm.EmailAddress = EmailAddress;
-            vm.EmailPassword = EmailPassword;
-            vm.SmtpAddress = SmtpAddress;
-            vm.SmtpPort = SmtpPort;
+            vm.RestoreCredentialSnapshot(snapshot);
             vm.AutoShutdown = AutoShutdown;
-            vm.SmtpUseSSL = SmtpUseSSL;
             vm.TranslateFailedAgain = TranslateFailedAgain;
             vm.TranslateFailedTimes = TranslateFailedTimes;
             ViewModelManager.SaveBaseConfig();
@@ -113,6 +171,7 @@ namespace AITranslator.View.Models
         public static ViewModel_SetView Create()
         {
             ViewModel_SetView vm = ViewModelManager.ViewModel.SetView_ViewModel;
+            var snapshot = vm.CaptureCredentialSnapshot();
             return new ViewModel_SetView
             {
                 DefaultTemplate_MTool = vm.DefaultTemplate_MTool,
@@ -120,12 +179,12 @@ namespace AITranslator.View.Models
                 DefaultTemplate_Srt = vm.DefaultTemplate_Srt,
                 DefaultTemplate_Txt = vm.DefaultTemplate_Txt,
                 EnableEmail = vm.EnableEmail,
-                EmailAddress = vm.EmailAddress,
-                EmailPassword = vm.EmailPassword,
-                SmtpAddress = vm.SmtpAddress,
-                SmtpPort = vm.SmtpPort,
+                EmailAddress = snapshot.EmailAddress,
+                SmtpAddress = snapshot.SmtpAddress,
+                SmtpPort = snapshot.SmtpPort,
                 AutoShutdown = vm.AutoShutdown,
-                SmtpUseSSL = vm.SmtpUseSSL,
+                SmtpUseSSL = snapshot.SmtpUseSSL,
+                EmailPassword = snapshot.EmailPassword,
                 TranslateFailedAgain = vm.TranslateFailedAgain,
                 TranslateFailedTimes = vm.TranslateFailedTimes,
             };
@@ -134,9 +193,15 @@ namespace AITranslator.View.Models
         [RelayCommand]
         private void SendTestMail()
         {
-            bool result = SmtpMailSender.SendTest(EmailAddress, EmailPassword, SmtpAddress, SmtpPort, SmtpUseSSL, out string error);
+            bool result = SmtpMailSender.SendTest(CaptureCredentialSnapshot(), out string error);
             if (!result)
-                Window_Message.ShowDialog("错误", $"发送测试邮件失败:{error}\r\n请检查网络是否通畅，或输入信息是否有误");
+                Window_Message.ShowDialog("错误", $"发送测试邮件失败:{error}" + Environment.NewLine + "请检查网络是否通畅，或输入信息是否有误");
         }
+    }
+
+    internal sealed record SmtpCredentialSnapshot(string EmailAddress, string EmailPassword,
+        string SmtpAddress, ushort SmtpPort, bool SmtpUseSSL)
+    {
+        public override string ToString() => "SMTP settings (credential redacted)";
     }
 }

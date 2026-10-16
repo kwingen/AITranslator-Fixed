@@ -21,22 +21,7 @@ namespace AITranslator.Translator.Persistent
             string fileBakName = fileNameNoExtension + "_bak" + fileExtension;
             try
             {
-                Dictionary<string, string?> dic;
-                if (File.Exists(fileBakName))
-                {
-                    try
-                    {
-                        dic = ReadData(fileBakName);
-                        File.Move(fileBakName, fileName, true);
-                    }
-                    catch (Exception)
-                    {
-                        File.Delete(fileBakName);
-                        dic = ReadData(filePath);
-                    }
-                }
-                else
-                    dic = ReadData(filePath);
+                Dictionary<string, string?> dic = ReadData(filePath);
 
                 return dic;
             }
@@ -47,6 +32,10 @@ namespace AITranslator.Translator.Persistent
             catch (UnauthorizedAccessException)
             {
                 throw new FileSaveException($"\r\n以下文件中的一个或多个被拒绝访问，请确保文件未被占用：\r\n[{fileBakName}]\r\n[{fileName}]\r\n");
+            }
+            catch (CsvHelperException)
+            {
+                throw new FileLoadException($"CSV文件格式错误：[{fileName}]");
             }
         }
 
@@ -69,16 +58,7 @@ namespace AITranslator.Translator.Persistent
                     strString = writer.ToString();
                 }
 
-                File.WriteAllText(fileBakName, strString);
-                File.Delete(fileName);
-                File.Copy(fileBakName, fileName, true);
-                File.Delete(fileBakName);
-                if (hide)
-                {
-                    FileAttributes attributes = File.GetAttributes(filePath);
-                    attributes |= FileAttributes.Hidden;
-                    File.SetAttributes(filePath, attributes);
-                }
+                CheckpointFile.WriteAllText(fileName, strString, hide, path => Load(path) is not null);
             }
             catch (IOException)
             {
@@ -104,7 +84,10 @@ namespace AITranslator.Translator.Persistent
                 }
             }
             foreach (KeyValueStruct record in records)
-                TppKvs.Add(record.Key, record.Value);
+            {
+                if (!TppKvs.TryAdd(record.Key, record.Value))
+                    throw new FileLoadException($"CSV文件包含重复键 {record.Key}：[{path}]");
+            }
             return TppKvs;
         }
 

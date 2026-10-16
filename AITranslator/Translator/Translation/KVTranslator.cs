@@ -140,8 +140,12 @@ namespace AITranslator.Translator.Translation
         internal override void MergeData()
         {
             ViewModelManager.WriteLine($"[{DateTime.Now:G}]开始合并翻译文件");
-            _translationTask.State = TaskState.Merging;
             Data.ReloadData();
+            foreach (var key in (Data.Dic_Cleaned ?? Data.Dic_Source).Keys)
+            {
+                if (!Data.Dic_Successful.ContainsKey(key) && !Data.Dic_Failed.ContainsKey(key))
+                    throw new KnownException($"内容 {key} 缺少翻译记录，无法合并，请先完成翻译。");
+            }
             Dictionary<string, string> dic_Merge = new Dictionary<string, string>();
             foreach (var key in Data.Dic_Source.Keys)
             {
@@ -150,7 +154,10 @@ namespace AITranslator.Translator.Translation
                 else if (Data.Dic_Failed.ContainsKey(key))
                     dic_Merge[key] = Data.Dic_Failed[key];
             }
-            JsonPersister.Save(dic_Merge, PublicParams.GetFileName(Data, GenerateFileType.Merged));
+            _translationTask.State = TaskState.Merging;
+            string outputPath = PublicParams.GetFileName(Data, GenerateFileType.Merged);
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            JsonPersister.Save(dic_Merge, outputPath);
             _translationTask.State = TaskState.Completed;
             _translationTask.SaveConfig();
         }
@@ -218,10 +225,8 @@ namespace AITranslator.Translator.Translation
             {
                 ViewModelManager.WriteLine($"\r\n" + source + "\r\n" + "    ⬇" + "\r\n" + translated);
                 ViewModelManager.WriteLine($"[{DateTime.Now:G}]{error}，正在尝试重新翻译...");
-                string reTranslate = Translate_Single(source, false, true);
-                if (Verification(source, translated, out error))
-                    translated = reTranslate;
-                else
+                translated = Translate_Single(source, false, true);
+                if (!Verification(source, translated, out error))
                 {
                     ViewModelManager.WriteLine($"\r\n" + source + "\r\n" + "    ⬇" + "\r\n" + translated);
                     ViewModelManager.WriteLine($"[{DateTime.Now:G}]{error},重试翻译仍未达标，记录到错误列表。");

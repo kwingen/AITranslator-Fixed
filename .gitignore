@@ -363,3 +363,13 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /LLamaSelect/Vulkan
+
+# Local translation data, credentials and publish output (never source).
+/Config.json
+/Config_bak.json
+/翻译数据/
+/.env
+/.env.*
+*.usersecrets
+*.dpapi
+/dist/

@@ -75,13 +75,23 @@ namespace AITranslator.Translator.Translation
                     else
                     {
                         sourceData = string.Join('\n', mergeValues);
-                        string result_mult = Translate_NoResetNewline(sourceData, true, TryTranslateType.Mult);
-                        results = result_mult.Split('\n');
+                        try
+                        {
+                            string result_mult = Translate_NoResetNewline(sourceData, true, TryTranslateType.Mult);
+                            results = result_mult.Split('\n');
+                        }
+                        catch (AITranslator.Translator.Communicator.OpenAICommunicationException error) when (
+                            error.FailureKind is AITranslator.Translator.Communicator.OpenAIFailureKind.ContextLengthExceeded
+                                or AITranslator.Translator.Communicator.OpenAIFailureKind.OutputTruncated)
+                        {
+                            // Use the existing per-entry verification/save loop, not uncheckpointed child batches.
+                            results = [];
+                        }
                     }
 
                     if (results.Length != mergeValues.Count)
                     {
-                        ViewModelManager.WriteLine($"[{DateTime.Now:G}]批量翻译换行数量不匹配，改为逐条翻译。");
+                        ViewModelManager.WriteLine($"[{DateTime.Now:G}]批量翻译无法使用，改为逐条翻译。");
                         for (int i = 0; i < mergeValues.Count; i++)
                         {
                             //单句翻译
@@ -171,7 +181,6 @@ namespace AITranslator.Translator.Translation
         internal override void MergeData()
         {
             ViewModelManager.WriteLine($"[{DateTime.Now:G}]开始合并翻译文件");
-            _translationTask.State = TaskState.Merging;
             Data.ReloadData();
             List<string> str = new List<string>();
             for (int i = 0; i < Data.List_Cleaned.Count; i++)
@@ -180,8 +189,13 @@ namespace AITranslator.Translator.Translation
                     str.Add(Data.Dic_Successful[i]);
                 else if (Data.Dic_Failed.ContainsKey(i))
                     str.Add(Data.Dic_Failed[i]);
+                else
+                    throw new KnownException($"行 {i} 缺少翻译记录，无法合并，请先完成翻译。");
             }
-            TxtPersister.Save(str, PublicParams.GetFileName(Data, GenerateFileType.Merged));
+            _translationTask.State = TaskState.Merging;
+            string outputPath = PublicParams.GetFileName(Data, GenerateFileType.Merged);
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            TxtPersister.Save(str, outputPath);
             _translationTask.State = TaskState.Completed;
             _translationTask.SaveConfig();
         }

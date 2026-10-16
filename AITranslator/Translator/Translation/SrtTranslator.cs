@@ -90,25 +90,37 @@ namespace AITranslator.Translator.Translation
         internal override void MergeData()
         {
             ViewModelManager.WriteLine($"[{DateTime.Now:G}]开始合并翻译文件");
-            _translationTask.State = TaskState.Merging;
             Data.ReloadData();
+            if (Data.Dic_Cleaned is not null)
+            {
+                foreach (var cue in Data.Dic_Cleaned)
+                {
+                    if (!Data.Dic_Source.TryGetValue(cue.Key, out var source) || source.Time != cue.Value.Time)
+                        throw new KnownException($"清理后的字幕 {cue.Key} 与原始字幕不匹配，请重新清理并翻译。");
+                }
+            }
+            foreach (int key in Data.Dic_Successful.Keys.Concat(Data.Dic_Failed.Keys))
+            {
+                if (!Data.Dic_Source.ContainsKey(key))
+                    throw new KnownException($"翻译记录中的字幕 {key} 不存在于原始字幕，请检查翻译记录。");
+            }
             Dictionary<int, SrtData> dic_Merge = new Dictionary<int, SrtData>();
             foreach (var key in Data.Dic_Source.Keys)
             {
+                SrtData mergedCue = Data.Dic_Source[key].Clone();
                 if (Data.Dic_Successful.ContainsKey(key))
-                    dic_Merge[key] = Data.Dic_Successful[key];
+                    mergedCue.Text = Data.Dic_Successful[key].Text;
                 else if (Data.Dic_Failed.ContainsKey(key))
-                    dic_Merge[key] = Data.Dic_Failed[key];
+                    mergedCue.Text = Data.Dic_Failed[key].Text;
+                else if (Data.Dic_Cleaned is null || Data.Dic_Cleaned.ContainsKey(key))
+                    throw new KnownException($"字幕 {key} 缺少翻译记录，无法合并，请先完成翻译。");
+                dic_Merge[key] = mergedCue;
             }
 
-            KeyValuePair<int, SrtData>[] dic_Merges = dic_Merge.OrderBy(s => s.Key).ToArray();
-            List<KeyValuePair<int, SrtData>> keyValuePairs = new List<KeyValuePair<int, SrtData>>();
-            for (int i = 0; i < dic_Merges.Length; i++)
-            {
-                KeyValuePair<int, SrtData> kv = dic_Merges[i];
-                keyValuePairs.Add(new KeyValuePair<int, SrtData>(i + 1, kv.Value));
-            }
-            SrtPersister.Save(keyValuePairs, PublicParams.GetFileName(Data, GenerateFileType.Merged));
+            _translationTask.State = TaskState.Merging;
+            string outputPath = PublicParams.GetFileName(Data, GenerateFileType.Merged);
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            SrtPersister.Save(dic_Merge.OrderBy(s => s.Key).ToArray(), outputPath);
             _translationTask.State = TaskState.Completed;
             _translationTask.SaveConfig();
         }

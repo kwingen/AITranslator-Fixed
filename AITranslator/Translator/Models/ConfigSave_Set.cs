@@ -1,4 +1,7 @@
 ﻿using AITranslator.View.Models;
+using AITranslator.Security;
+using Newtonsoft.Json;
+using System.Runtime.Serialization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using System;
 using System.Collections.Generic;
@@ -8,6 +11,7 @@ using System.Threading.Tasks;
 
 namespace AITranslator.Translator.Models
 {
+    [JsonConverter(typeof(CredentialConfigReader))]
     public class ConfigSave_Set
     {
         /// <summary>
@@ -37,7 +41,54 @@ namespace AITranslator.Translator.Models
         /// <summary>
         /// 邮箱密码
         /// </summary>
-        public string EmailPassword { get; set; }
+        private string emailPassword = string.Empty;
+        private string? emailPasswordPurpose;
+
+        [JsonIgnore]
+        public string EmailPassword
+        {
+            get
+            {
+                if (emailPasswordPurpose != null && emailPasswordPurpose != EmailCredentialPurpose)
+                    throw new CredentialProtectionException();
+                return emailPassword;
+            }
+            set
+            {
+                emailPassword = value ?? string.Empty;
+                emailPasswordPurpose = null;
+            }
+        }
+
+        [JsonProperty("ProtectedEmailPassword", NullValueHandling = NullValueHandling.Ignore)]
+        private string? ProtectedEmailPassword { get; set; }
+
+        // Read-only compatibility path: a subsequent save only writes the protected field.
+        [JsonProperty("EmailPassword")]
+        private string? LegacyEmailPassword { set => EmailPassword = value ?? string.Empty; }
+
+        private string EmailCredentialPurpose => "smtp-auth:" + JsonConvert.SerializeObject(new object?[]
+        {
+            EmailAddress, SmtpAddress, SmtpPort, SmtpUseSSL
+        });
+
+        [OnSerializing]
+        private void ProtectEmailPassword(StreamingContext context)
+        {
+            ProtectedEmailPassword = string.IsNullOrEmpty(EmailPassword) ? null :
+                CurrentUserCredentialProtector.Protect(emailPassword, EmailCredentialPurpose);
+            emailPasswordPurpose = string.IsNullOrEmpty(emailPassword) ? null : EmailCredentialPurpose;
+        }
+
+        [OnDeserialized]
+        private void RestoreEmailPassword(StreamingContext context)
+        {
+            if (ProtectedEmailPassword != null)
+            {
+                emailPassword = CurrentUserCredentialProtector.Unprotect(ProtectedEmailPassword, EmailCredentialPurpose);
+                emailPasswordPurpose = EmailCredentialPurpose;
+            }
+        }
         /// <summary>
         /// SMTP服务器地址
         /// </summary>
@@ -69,12 +120,13 @@ namespace AITranslator.Translator.Models
             DefaultTemplate_Tpp = vm.DefaultTemplate_Tpp?.Name;
             DefaultTemplate_Srt = vm.DefaultTemplate_Srt?.Name;
             DefaultTemplate_Txt = vm.DefaultTemplate_Txt?.Name;
+            var snapshot = vm.CaptureCredentialSnapshot();
             EnableEmail = vm.EnableEmail;
-            EmailAddress = vm.EmailAddress;
-            EmailPassword = vm.EmailPassword;
-            SmtpAddress = vm.SmtpAddress;
-            SmtpPort = vm.SmtpPort;
-            SmtpUseSSL = vm.SmtpUseSSL;
+            EmailAddress = snapshot.EmailAddress;
+            SmtpAddress = snapshot.SmtpAddress;
+            SmtpPort = snapshot.SmtpPort;
+            SmtpUseSSL = snapshot.SmtpUseSSL;
+            EmailPassword = snapshot.EmailPassword;
             TranslateFailedAgain = vm.TranslateFailedAgain;
             TranslateFailedTimes = vm.TranslateFailedTimes;
             AutoShutdown = vm.AutoShutdown;
@@ -87,11 +139,7 @@ namespace AITranslator.Translator.Models
             vm.DefaultTemplate_Srt = ViewModelManager.ViewModel.TemplateConfigs.FirstOrDefault(s => s.Name == DefaultTemplate_Srt);
             vm.DefaultTemplate_Txt = ViewModelManager.ViewModel.TemplateConfigs.FirstOrDefault(s => s.Name == DefaultTemplate_Txt);
             vm.EnableEmail = EnableEmail;
-            vm.EmailAddress = EmailAddress;
-            vm.EmailPassword = EmailPassword;
-            vm.SmtpAddress = SmtpAddress;
-            vm.SmtpPort = SmtpPort;
-            vm.SmtpUseSSL = SmtpUseSSL;
+            vm.RestoreCredentialSnapshot(new SmtpCredentialSnapshot(EmailAddress, EmailPassword, SmtpAddress, SmtpPort, SmtpUseSSL));
             vm.TranslateFailedAgain = TranslateFailedAgain;
             vm.TranslateFailedTimes = TranslateFailedTimes;
             vm.AutoShutdown = AutoShutdown;

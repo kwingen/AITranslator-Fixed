@@ -39,33 +39,41 @@ namespace AITranslator.Mail
         public static bool Send(string title, string Message, out string error)
         {
             ViewModel_SetView vm = ViewModelManager.ViewModel.SetView_ViewModel;
-            return Send(title, Message, vm.EmailAddress, vm.EmailPassword, vm.SmtpAddress, vm.SmtpPort, vm.SmtpUseSSL, out error);
+            return Send(title, Message, vm.CaptureCredentialSnapshot(), out error);
         }
 
         public static bool Send(string title, string Message, string mailAddress, string mailPassword, string smtpAddress, ushort smtpPort, bool useSSL, out string error)
+            => Send(title, Message, new SmtpCredentialSnapshot(mailAddress, mailPassword, smtpAddress, smtpPort, useSSL), out error);
+
+        internal static bool SendTest(SmtpCredentialSnapshot snapshot, out string error)
+            => Send("[AITranslator]测试邮件", "此邮件为AITranslator的测试邮件，如您未使用此软件，请立刻检查自身SMTP权限授权码是否泄漏！", snapshot, out error);
+
+        // The transport callback is a test boundary: production always uses SmtpClient.Send.
+        internal static bool Send(string title, string message, SmtpCredentialSnapshot snapshot, out string error,
+            Action<SmtpClient, MailMessage>? transmit = null)
         {
             error = string.Empty;
+            if (string.IsNullOrEmpty(snapshot.EmailPassword))
+            {
+                error = "Re-enter the SMTP authorization code for this destination before sending.";
+                return false;
+            }
             try
             {
-                // 创建邮件对象
-                using (MailMessage mail = new MailMessage(mailAddress, mailAddress))
+                using var mail = new MailMessage(snapshot.EmailAddress, snapshot.EmailAddress)
                 {
-                    mail.Subject = title;
-                    mail.Body = Message;
-                    // 创建SMTP客户端
-                    using (SmtpClient smtpClient = new SmtpClient(smtpAddress))
-                    {
-                        smtpClient.Timeout = 3000;
-                        smtpClient.Port = smtpPort;
-                        smtpClient.Credentials = new NetworkCredential(mailAddress, mailPassword);
-                        smtpClient.EnableSsl = useSSL;
-
-                        // 发送邮件
-                        smtpClient.Send(mail);
-                    }
-                }
-
-
+                    Subject = title,
+                    Body = message
+                };
+                using var smtpClient = new SmtpClient(snapshot.SmtpAddress)
+                {
+                    Timeout = 3000,
+                    Port = snapshot.SmtpPort,
+                    Credentials = new NetworkCredential(snapshot.EmailAddress, snapshot.EmailPassword),
+                    EnableSsl = snapshot.SmtpUseSSL
+                };
+                if (transmit == null) smtpClient.Send(mail);
+                else transmit(smtpClient, mail);
                 return true;
             }
             catch (Exception ex)

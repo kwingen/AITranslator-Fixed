@@ -92,17 +92,12 @@ namespace AITranslator.Translator.Pretreatment
 
             Dictionary<int, SrtData> output = new Dictionary<int, SrtData>();
             KeyValuePair<int, SrtData>[] kvs = input.OrderBy(s => s.Key).ToArray();
-            int t = 1;
             for (int i = 0; i < kvs.Length; i++)
             {
                 KeyValuePair<int, SrtData> kv = kvs[i];
                 string text = kv.Value.Text;
                 if (notCleanStrs.Contains(text))
-                {
-                    output[t] = kv.Value;
-                    t++;
-                }
-
+                    output[kv.Key] = kv.Value;
             }
 
             return output;

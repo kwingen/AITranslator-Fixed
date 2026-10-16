@@ -62,20 +62,20 @@ namespace AITranslator.Translator.TranslateData
                 throw new KnownException("不存在原始文件！");
 
             string cleanedFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Cleaned);
-            if (File.Exists(cleanedFile))
-                Dic_Cleaned = JsonPersister.Load<Dictionary<string, Dictionary<string, string?>>>(cleanedFile).ToMergeDic();
+            if (CheckpointFile.Exists(cleanedFile))
+                Dic_Cleaned = JsonPersister.LoadInternal<Dictionary<string, Dictionary<string, string?>>>(cleanedFile).ToMergeDic();
             else
                 Dic_Cleaned = null;
 
             string successfulFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Successful);
-            if (File.Exists(successfulFile))
-                Dic_Successful = JsonPersister.Load<Dictionary<string, Dictionary<string, string?>>>(successfulFile).ToMergeDic();
+            if (CheckpointFile.Exists(successfulFile))
+                Dic_Successful = JsonPersister.LoadInternal<Dictionary<string, Dictionary<string, string?>>>(successfulFile).ToMergeDic();
             else
                 Dic_Successful = new Dictionary<string, string?>();
 
             string failedFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Failed);
-            if (File.Exists(failedFile))
-                Dic_Failed = JsonPersister.Load<Dictionary<string, Dictionary<string, string?>>>(failedFile).ToMergeDic();
+            if (CheckpointFile.Exists(failedFile))
+                Dic_Failed = JsonPersister.LoadInternal<Dictionary<string, Dictionary<string, string?>>>(failedFile).ToMergeDic();
             else
                 Dic_Failed = new Dictionary<string, string?>();
         }
@@ -127,9 +127,9 @@ namespace AITranslator.Translator.TranslateData
         public static bool HasFailedData(string dicName)
         {
             string failedFile = PublicParams.GetFileName(dicName, type, GenerateFileType.Failed);
-            if (!File.Exists(failedFile))
+            if (!CheckpointFile.Exists(failedFile))
                 return false;
-            Dictionary<string, Dictionary<string, string?>> dic_failed = JsonPersister.Load<Dictionary<string, Dictionary<string, string?>>>(failedFile);
+            Dictionary<string, Dictionary<string, string?>> dic_failed = JsonPersister.LoadInternal<Dictionary<string, Dictionary<string, string?>>>(failedFile);
             return dic_failed?.GetTotalCount() != 0;
         }
     }

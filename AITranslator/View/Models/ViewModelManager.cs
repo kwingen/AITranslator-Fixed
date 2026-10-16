@@ -48,10 +48,10 @@ namespace AITranslator.View.Models
         /// </summary>
         public static void LoadBaseConfig()
         {
-            if (!File.Exists(PublicParams.ConfigPath_LoadModel))
+            if (!CheckpointFile.Exists(PublicParams.ConfigPath_LoadModel))
                 SaveBaseConfig();
 
-            ConfigSave_Base save = JsonPersister.Load<ConfigSave_Base>(PublicParams.ConfigPath_LoadModel);
+            ConfigSave_Base save = JsonPersister.LoadInternal<ConfigSave_Base>(PublicParams.ConfigPath_LoadModel);
             ViewModel.AgreedStatement = save.AgreedStatement;
             if (save.DefaultCommunicator is not null)
                 ViewModel.DefaultCommunicatorParam = ViewModel.CommunicatorParams.FirstOrDefault(s => s.Name == save.DefaultCommunicator);

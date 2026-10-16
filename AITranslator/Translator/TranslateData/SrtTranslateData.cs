@@ -84,26 +84,26 @@ namespace AITranslator.Translator.TranslateData
         public void ReloadData()
         {
             string sourceFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Source);
-            if (File.Exists(sourceFile))
-                Dic_Source = SrtPersister.Load(sourceFile);
+            if (CheckpointFile.Exists(sourceFile))
+                Dic_Source = SrtPersister.LoadInternal(sourceFile);
             else
                 throw new KnownException("不存在原始文件！");
 
             string cleanedFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Cleaned);
-            if (File.Exists(cleanedFile))
-                Dic_Cleaned = SrtPersister.Load(cleanedFile);
+            if (CheckpointFile.Exists(cleanedFile))
+                Dic_Cleaned = SrtPersister.LoadInternal(cleanedFile);
             else
                 Dic_Cleaned = null;
 
             string successfulFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Successful);
-            if (File.Exists(successfulFile))
-                Dic_Successful = SrtPersister.Load(successfulFile);
+            if (CheckpointFile.Exists(successfulFile))
+                Dic_Successful = SrtPersister.LoadInternal(successfulFile);
             else
                 Dic_Successful = new Dictionary<int, SrtData>();
 
             string failedFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Failed);
-            if (File.Exists(failedFile))
-                Dic_Failed = SrtPersister.Load(failedFile);
+            if (CheckpointFile.Exists(failedFile))
+                Dic_Failed = SrtPersister.LoadInternal(failedFile);
             else
                 Dic_Failed = new Dictionary<int, SrtData>();
         }
@@ -142,8 +142,8 @@ namespace AITranslator.Translator.TranslateData
         {
             Dictionary<int, SrtData> dic_Source;
             string sourceFile = PublicParams.GetFileName(dicName, type, GenerateFileType.Source);
-            if (File.Exists(sourceFile))
-                dic_Source = SrtPersister.Load(sourceFile);
+            if (CheckpointFile.Exists(sourceFile))
+                dic_Source = SrtPersister.LoadInternal(sourceFile);
             else
                 throw new KnownException("不存在原始数据文件！");
 
@@ -155,9 +155,9 @@ namespace AITranslator.Translator.TranslateData
         public static bool HasFailedData(string dicName)
         {
             string failedFile = PublicParams.GetFileName(dicName, type, GenerateFileType.Failed);
-            if (!File.Exists(failedFile))
+            if (!CheckpointFile.Exists(failedFile))
                 return false;
-            Dictionary<int, SrtData> dic_failed = SrtPersister.Load(failedFile);
+            Dictionary<int, SrtData> dic_failed = SrtPersister.LoadInternal(failedFile);
             return dic_failed.Count != 0;
         }
     }

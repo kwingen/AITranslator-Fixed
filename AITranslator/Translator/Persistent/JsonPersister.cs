@@ -24,6 +24,14 @@ namespace AITranslator.Translator.Persistent
         /// <param name="filePath">文件地址</param>
         /// <returns>被加载成功的数据</returns>
         /// <exception cref="JsonDeserializeLoadException">加载失败异常</exception>
+        public static T LoadInternal<T>(string filePath) => CheckpointFile.Load(filePath, path =>
+        {
+            T value = Load<T>(path);
+            if (value is null)
+                throw new FileLoadException($"内部状态文件为空或为null: {path}");
+            return value;
+        });
+
         public static T Load<T>(string filePath)
         {
             FileInfo fileInfo = new FileInfo(filePath);
@@ -35,26 +43,9 @@ namespace AITranslator.Translator.Persistent
             T result;
             try
             {
-                if (File.Exists(fileBakName))
-                {
-                    try
-                    {
-                        json = File.ReadAllText(fileBakName);
-                        result = JsonConvert.DeserializeObject<T>(json);
-                        File.Move(fileBakName, fileName, true);
-                    }
-                    catch (JsonReaderException err)
-                    {
-                        File.Delete(fileBakName);
-                        json = File.ReadAllText(fileName);
-                        result = JsonConvert.DeserializeObject<T>(json);
-                    }
-                }
-                else
-                {
-                    json = File.ReadAllText(fileName);
-                    result = JsonConvert.DeserializeObject<T>(json);
-                }
+                // External imports are read-only. Recovery is an explicit internal operation.
+                json = File.ReadAllText(fileName);
+                result = JsonConvert.DeserializeObject<T>(json);
             }
             catch (IOException)
             {
@@ -90,16 +81,8 @@ namespace AITranslator.Translator.Persistent
                 JsonSerializerSettings jsetting = new JsonSerializerSettings();
                 jsetting.DefaultValueHandling = DefaultValueHandling.Ignore;
                 string json = JsonConvert.SerializeObject(obj, Formatting.Indented, jsetting);
-                File.WriteAllText(fileBakName, json);
-                File.Delete(fileName);
-                File.Copy(fileBakName, fileName, true);
-                File.Delete(fileBakName);
-                if (hide)
-                {
-                    FileAttributes attributes = File.GetAttributes(filePath);
-                    attributes |= FileAttributes.Hidden;
-                    File.SetAttributes(filePath, attributes);
-                }
+                AITranslator.Security.CredentialConfigMigration.PrepareForSave(obj?.GetType() ?? typeof(T), fileName);
+                CheckpointFile.WriteAllText(fileName, json, hide, path => Load<T>(path) is not null);
             }
             catch (IOException err)
             {

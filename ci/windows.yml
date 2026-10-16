@@ -1,0 +1,46 @@
+name: Windows build and regression tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore locked dependencies
+        run: dotnet restore AITranslator.sln --locked-mode
+      - name: Build full WPF solution
+        run: dotnet build AITranslator.sln -c Release --no-restore
+      - name: Run regression tests
+        run: dotnet test AITranslator.Tests/AITranslator.Tests.csproj -c Release --no-build --no-restore --logger trx --results-directory TestResults
+      - name: Publish external-server build
+        run: dotnet publish AITranslator/AITranslator.csproj -c Release --no-restore --self-contained false -o dist/AITranslator-Fixed
+      - name: Include license and maintenance notes
+        shell: pwsh
+        run: |
+          Copy-Item LICENSE dist/AITranslator-Fixed/LICENSE
+          Copy-Item docs/MAINTENANCE.md dist/AITranslator-Fixed/MAINTENANCE.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-results
+          path: TestResults/*.trx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AITranslator-Fixed-windows-external-server
+          path: dist/AITranslator-Fixed/
+          if-no-files-found: error

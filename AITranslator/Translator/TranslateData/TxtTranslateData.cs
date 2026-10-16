@@ -55,26 +55,26 @@ namespace AITranslator.Translator.TranslateData
         public void ReloadData()
         {
             string sourceFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Source);
-            if (File.Exists(sourceFile))
-                List_Source = TxtPersister.Load(sourceFile);
+            if (CheckpointFile.Exists(sourceFile))
+                List_Source = TxtPersister.LoadInternal(sourceFile);
             else
                 throw new KnownException("不存在原始文件！");
 
             string cleanedFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Cleaned);
-            if (File.Exists(cleanedFile))
-                List_Cleaned = TxtPersister.Load(cleanedFile);
+            if (CheckpointFile.Exists(cleanedFile))
+                List_Cleaned = TxtPersister.LoadInternal(cleanedFile);
             else
                 List_Cleaned = null;
 
             string successfulFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Successful);
-            if (File.Exists(successfulFile))
-                Dic_Successful = JsonPersister.Load<Dictionary<int, string>>(successfulFile);
+            if (CheckpointFile.Exists(successfulFile))
+                Dic_Successful = JsonPersister.LoadInternal<Dictionary<int, string>>(successfulFile);
             else
                 Dic_Successful = new Dictionary<int, string>();
 
             string failedFile = PublicParams.GetFileName(DicName, Type, GenerateFileType.Failed);
-            if (File.Exists(failedFile))
-                Dic_Failed = JsonPersister.Load<Dictionary<int, string>>(failedFile);
+            if (CheckpointFile.Exists(failedFile))
+                Dic_Failed = JsonPersister.LoadInternal<Dictionary<int, string>>(failedFile);
             else
                 Dic_Failed = new Dictionary<int, string>();
         }
@@ -115,8 +115,8 @@ namespace AITranslator.Translator.TranslateData
         {
             List<string> list_source;
             string sourceFile = PublicParams.GetFileName(dicName, type, GenerateFileType.Source);
-            if (File.Exists(sourceFile))
-                list_source = TxtPersister.Load(sourceFile);
+            if (CheckpointFile.Exists(sourceFile))
+                list_source = TxtPersister.LoadInternal(sourceFile);
             else
                 throw new KnownException("不存在原始数据文件！");
 
@@ -128,9 +128,9 @@ namespace AITranslator.Translator.TranslateData
         public static bool HasFailedData(string dicName)
         {
             string failedFile = PublicParams.GetFileName(dicName, type, GenerateFileType.Failed);
-            if (!File.Exists(failedFile))
+            if (!CheckpointFile.Exists(failedFile))
                 return false;
-            Dictionary<int, string> dic_failed = JsonPersister.Load<Dictionary<int, string>>(failedFile);
+            Dictionary<int, string> dic_failed = JsonPersister.LoadInternal<Dictionary<int, string>>(failedFile);
             return dic_failed.Count != 0;
         }
     }

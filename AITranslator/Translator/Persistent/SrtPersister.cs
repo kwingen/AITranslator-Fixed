@@ -15,6 +15,8 @@ namespace AITranslator.Translator.Persistent
 {
     public static class SrtPersister
     {
+        public static Dictionary<int, SrtData> LoadInternal(string filePath) => CheckpointFile.Load(filePath, Load);
+
         public static Dictionary<int, SrtData> Load(string filePath)
         {
             FileInfo fileInfo = new FileInfo(filePath);
@@ -24,22 +26,7 @@ namespace AITranslator.Translator.Persistent
             string fileBakName = fileNameNoExtension + "_bak" + fileExtension;
             try
             {
-                Dictionary<int, SrtData> dic;
-                if (File.Exists(fileBakName))
-                {
-                    try
-                    {
-                        dic = ReadData(fileBakName);
-                        File.Move(fileBakName, fileName, true);
-                    }
-                    catch (Exception)
-                    {
-                        File.Delete(fileBakName);
-                        dic = ReadData(filePath);
-                    }
-                }
-                else
-                    dic = ReadData(filePath);
+                Dictionary<int, SrtData> dic = ReadData(filePath);
 
                 return dic;
             }
@@ -70,16 +57,7 @@ namespace AITranslator.Translator.Persistent
                 foreach (var data in datas)
                     stringBuilder.Append($"{data.Key}\n{data.Value}\n\n");
                 string strString = stringBuilder.ToString();
-                File.WriteAllText(fileBakName, strString);
-                File.Delete(fileName);
-                File.Copy(fileBakName, fileName, true);
-                File.Delete(fileBakName);
-                if (hide)
-                {
-                    FileAttributes attributes = File.GetAttributes(filePath);
-                    attributes |= FileAttributes.Hidden;
-                    File.SetAttributes(filePath, attributes);
-                }
+                CheckpointFile.WriteAllText(fileName, strString, hide, path => Load(path) is not null);
             }
             catch (IOException)
             {
@@ -104,8 +82,12 @@ namespace AITranslator.Translator.Persistent
 
                 string[] srt_string = srtString.Split('\n');
                 srt_string = srt_string.Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
-                int index = int.Parse(srt_string[0]);
-                dic.Add(index, new SrtData(srt_string[1..]));
+                if (srt_string.Length < 2)
+                    throw new FormatException("字幕条目缺少时间轴。");
+                if (!int.TryParse(srt_string[0], out int index))
+                    throw new FormatException("字幕序号无效或超出范围。");
+                if (!dic.TryAdd(index, new SrtData(srt_string[1..])))
+                    throw new FormatException($"字幕序号 {index} 重复。");
             }
             return dic;
         }
